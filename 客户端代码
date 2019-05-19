@@ -1,0 +1,407 @@
+#include "function.h"
+
+char name[3];
+char ch;
+
+void GetName(int n)
+{
+    bzero(name,3);
+    if(n==13)
+    {
+        *name = 'X';
+        return;
+    }
+    else if(n==14)
+    {
+        *name = 'S';
+        return;
+    }
+    int y = n % 13;
+    y++;
+    switch (y)
+    {
+    case 1:*name='A';break;
+    case 11:*name='J';break;
+    case 12:*name='Q';break;
+    case 13:*name='K';break;
+    case 10:*name='1';name[1]='0';break;
+    default:
+            name[0] = '0' + y;break;
+    }
+}
+
+void ShowPoker(char *buf)
+{
+    for (int i = 0; buf[i]!=-1; i++)
+    {
+        GetName((int)buf[i]);
+        printf("%s ", name);
+    }
+}
+
+int recvCYL(int fd,void *pbuf,int len)
+{
+    char *buf = (char*)pbuf;
+    int total = 0,ret;
+    while(total<len)
+    {
+        ret = recv(fd,buf+total,len-total,0);
+        if(ret == 0)
+        {
+            printf("您的会员已到期请尽快充值\n");
+            exit(0);
+        }
+        total += ret;
+    }
+    return 0;
+}
+
+void print(char*next_name,char*front_name,char front_poker[][25],int *juge_host,int *rest_poker)
+{
+    system("clear");
+    printf("-------------------------辣鸡斗地主------------------------\n\n");
+    printf("plyer1: %s %s             plyer2: %s %s                  \n",
+           next_name,juge_host[0]==1?"[地主]":"[农民]",
+           front_name,juge_host[1]==0?"[农民]":"[地主]");
+    for(int i=0;i<4;i++)
+        printf("         ||                          ||          \n");
+    printf("rest: %d                                          rest: %d\n",rest_poker[0],rest_poker[1]);
+    if(*front_poker[0]== -2)
+        printf("正在出牌...");
+    else if(*front_poker[0]== -1)
+    {
+        printf("上次出牌：不出");
+    }else
+    { 
+        printf("上次出牌: ");
+        ShowPoker(front_poker[0]);
+    }
+    printf("                           ");
+    if(*front_poker[1]== -2)
+        printf("正在出牌...");
+    else if(*front_poker[1]== -1)
+    {
+        printf("上次出牌：不出");
+    }else
+    { 
+        printf("上次出牌: ");
+        ShowPoker(front_poker[1]);
+    }
+    printf("\n\n----------------------------------------------------\n");
+}
+
+void send_poker(int fd)
+{
+    Train_t train;
+    int k =0;
+    char buf[25];
+    char *p = buf;
+    memset(buf,-1,25);
+    bzero(&train,sizeof(Train_t));
+    int flag = fcntl(0,F_GETFL);
+    flag = flag | O_NONBLOCK;
+    fcntl(0,F_SETFL,flag);
+    while((ch=getchar())!=-1);
+    flag = fcntl(0,F_GETFL);
+    flag &= ~O_NONBLOCK;
+    fcntl(0,F_SETFL,flag);
+    scanf("%s",buf);
+    while(*p!=-1)
+    {
+        switch(*p)
+        {
+        case 'N':
+            train.Len = 1;
+            *(train.buf)=-1;
+            send(fd,&train,9,0);
+            return;
+        case 'S':
+            train.buf[k++] = 14;break;
+        case 'X':
+            train.buf[k++] = 13;break;
+        case 'A':
+            train.buf[k++] = 0;break;
+        case 'J':
+            train.buf[k++] = 10;break;
+        case 'Q':
+            train.buf[k++] = 11;break;
+        case 'K':
+            train.buf[k++] = 12;break;
+        case '1':
+            train.buf[k++] = 9;p++;break;
+        default:
+            train.buf[k++] = *p -'0'-1;break;
+        }
+        p++;
+    }
+    train.Len = k-1;
+    send(fd,&train,8+train.Len,0);
+    return;
+}
+int main(int argc,char *argv[])
+{
+    ARGS_CHECK(argc,4);
+    int cFd,just_len;
+    cFd=socket(AF_INET,SOCK_STREAM,0);
+    ERROR_CHECK(cFd,-1,"socket");
+    struct sockaddr_in ser;
+    bzero(&ser,sizeof(ser));
+    ser.sin_family=AF_INET;
+    ser.sin_port=htons(atoi(argv[2]));
+    ser.sin_addr.s_addr=inet_addr(argv[1]);//点分十进制转为32位的网络字节序
+    int ctl_code,len,ret,juge_host[3]={0},rest_poker[3];
+    Train_t train;
+    char buf[100],poker[25];
+    char front_name[50]={0};
+    char next_name[50]={0};
+    char ply_name[50]={0};
+    char front_poker[3][25];
+    char next_speak[50]={0},just_speak[50]={0},just_poker[25];
+    memset(just_poker,-1,25);
+    memset(front_poker,-1,25);
+    memset(front_poker[1],-1,25);
+    memset(buf,-1,sizeof(buf));
+    memset(poker,-1,sizeof(poker));
+    memset(front_name,0,50);
+    memset(next_name,0,50);
+    ret=connect(cFd,(struct sockaddr*)&ser,sizeof(ser));
+    ERROR_CHECK(ret,-1,"connect");
+    printf("connect successful 匹配中... \n");
+    send(cFd,argv[3],sizeof(argv[3]),0);
+    recvCYL(cFd,&len,4);
+    recvCYL(cFd,&ctl_code,4);
+    recvCYL(cFd,next_name,len);
+    recvCYL(cFd,&len,4);
+    recvCYL(cFd,&ctl_code,4);
+    recvCYL(cFd,front_name,len);
+    recvCYL(cFd,&len,4);
+    recvCYL(cFd,&ctl_code,4);
+    recvCYL(cFd,buf,len);
+    printf("匹配成功，现在将进入游戏\n\n");
+    printf("player: %s                               player :%s\n\n",next_name,front_name);
+    for(int i =0;i<len;i++)
+    {
+        GetName(buf[i]);
+        printf("%s ",name);
+        fflush(stdout);
+        usleep(400000);
+    }
+    printf("\r");
+    memset(buf,-1,sizeof(buf));
+    recvCYL(cFd,&len,4);
+    recvCYL(cFd,&ctl_code,4);
+    recvCYL(cFd,buf,len);
+    ShowPoker(buf);
+    printf("\n");
+    memcpy(poker,buf,17);
+    printf("\n");
+    while(1)
+    {
+        memset(buf,-1,sizeof(buf));
+        recvCYL(cFd,&len,4);
+        recvCYL(cFd,&ctl_code,4);
+        recvCYL(cFd,buf,len);
+        switch(ctl_code)
+        {
+        case 2:
+            buf[len]=0;
+            strcpy(ply_name,buf);
+            if(strcmp(buf,argv[3])==0)
+            {
+                printf("是否抢地主？回复1代表强地主，2代表不抢\n");
+    int flag = fcntl(0,F_GETFL);
+    flag = flag | O_NONBLOCK;
+    fcntl(0,F_SETFL,flag);
+    while((ch=getchar())!=-1);
+    flag = fcntl(0,F_GETFL);
+    flag &= ~O_NONBLOCK;
+    fcntl(0,F_SETFL,flag);
+                *(train.buf)=getchar();
+                train.Len = 1;
+                train.ctl_code = 2;
+                send(cFd,&train,9,0);
+                if(*(train.buf)=='1')
+                    printf("你选择抢地主\n");
+                else
+                    printf("你选择不抢地主\n");
+            }
+            else
+            {
+                printf("plyer: %s正在选择是否抢地主，请等待\n",buf);
+                memset(buf,-1,sizeof(buf));
+                recvCYL(cFd,&len,4);
+                recvCYL(cFd,&ctl_code,4);
+                recvCYL(cFd,buf,len);
+                if(*buf == '1')
+                    printf("plyer: %s选择抢地主，请等待\n",ply_name);
+                else
+                    printf("plyer: %s选择不抢地主，请等待\n",ply_name);
+            }
+            break;
+        case 3:
+            buf[len]=0;
+            if(strcmp(buf,argv[3])==0)
+            {
+                printf("你是地主,三张底牌为: ");
+                strcpy(ply_name,buf);
+                memset(buf,-1,sizeof(buf));
+                recvCYL(cFd,&len,4);
+                recvCYL(cFd,&ctl_code,4);
+                recvCYL(cFd,buf,len);
+                ShowPoker(buf);
+                printf("\n");
+                recvCYL(cFd,&len,4);
+                recvCYL(cFd,&ctl_code,4);
+                recvCYL(cFd,poker,len);
+            }
+            else
+            {
+                printf("plyer: %s 是地主,三张底牌为: ",buf);
+                strcpy(ply_name,buf);
+                memset(buf,-1,sizeof(buf));
+                recvCYL(cFd,&len,4);
+                recvCYL(cFd,&ctl_code,4);
+                recvCYL(cFd,buf,len);
+                ShowPoker(buf);
+                printf("\n");
+            }
+            printf("游戏即将开始，请等待\n");
+            sleep(2);
+            if(strcmp(next_name,ply_name)==0)
+            {
+                juge_host[0]=1;
+                rest_poker[1]=17;
+                rest_poker[0]=20;
+                *(front_poker[0])=-2;
+            }
+            else if(strcmp(front_name,ply_name)==0)
+            {
+                juge_host[1]=1;
+                rest_poker[1]=20;
+                rest_poker[0]=17;
+                *(front_poker[1])=-2;
+            }
+            else
+            {
+                juge_host[2]=1;
+                rest_poker[0]=17;
+                rest_poker[1]=17;
+                rest_poker[2]=20;
+                *(front_poker[2])=-2;
+            }
+            recvCYL(cFd,&len,4);
+            recvCYL(cFd,&ctl_code,4);
+            recvCYL(cFd,next_speak,len);
+            print(next_name,front_name,front_poker,juge_host,rest_poker);
+            printf("三张底牌为: ");
+            ShowPoker(buf);
+            printf("\n");
+            if(strcmp(next_speak,next_name)==0)
+                printf("plyer: %s 正在出牌\n\n",next_name);
+            else if(strcmp(next_speak,front_name)==0)
+                printf("plyer: %s 正在出牌\n\n",front_name);
+            else
+                printf("地主大佬，请出牌：\n\n");
+            printf("你的牌为：   ");
+            ShowPoker(poker);
+            printf("\n\n");
+            if(juge_host[2]==1)
+                send_poker(cFd);
+            break;
+        case 4:           
+            break;
+        case 5:
+            print(next_name,front_name,front_poker,juge_host,rest_poker);
+            printf("   player: %s     出牌: ",just_speak);
+            ShowPoker(just_poker);
+            if(*just_poker == -1)
+                printf("不出");
+            printf("\n\n");
+            printf("你剩余的牌为:  ");
+            ShowPoker(poker);
+            printf("\n\n小伙纸，你肯定木有这几张牌，请重新出牌，‘N'表示不出\n");
+            send_poker(cFd);
+            break;
+        case 6:
+            buf[len]=0;
+            strcpy(just_speak,buf);
+            memset(just_poker,-1,sizeof(just_poker));
+            recvCYL(cFd,&just_len,4);
+            recvCYL(cFd,&ctl_code,4);
+            recvCYL(cFd,just_poker,just_len);
+            if(strcmp(just_speak,next_name)==0)
+            {
+                rest_poker[0] -= just_len;
+                memcpy(front_poker[0],just_poker,just_len);
+                if(just_len == 0)
+                    *(front_poker[0]) = -1;
+            }
+            if(strcmp(just_speak,front_name)==0)
+            {
+                rest_poker[1] -= just_len;
+                memcpy(front_poker[1],just_poker,just_len);
+                if(just_len == 0)
+                    *(front_poker[1]) = -1;
+            }
+            recvCYL(cFd,&len,4);
+            recvCYL(cFd,&ctl_code,4);
+            recvCYL(cFd,buf,len);
+            buf[len] = 0;
+            if(strcmp(buf,next_name)==0)
+                *(front_poker[0]) = -2;
+            else if(strcmp(buf,front_name)==0)
+                *(front_poker[1]) = -2;
+            print(next_name,front_name,front_poker,juge_host,rest_poker);
+            printf("   player: %s     出牌: ",just_speak);
+            ShowPoker(just_poker);
+            if(*just_poker == -1)
+                printf("不出");
+            printf("\n\n");
+            if(strcmp(just_speak,argv[3])==0)
+            {
+                recvCYL(cFd,&len,4);
+                recvCYL(cFd,&ctl_code,4);
+                recvCYL(cFd,poker,len); 
+                poker[len] =-1;
+                if(len == 0)
+                {
+                    printf("流啤流脾，大佬你赢了，奖励女朋友三只，请10秒后领取\n\n");
+                    recvCYL(cFd,buf,1000);
+                }
+            }
+            printf("你剩余的牌为:  ");
+            ShowPoker(poker);
+            printf("\n\n");
+            if(rest_poker[0]<=0)
+            {
+                printf("大佬%s 赢了，你个菜鸡\n",next_name);
+                sleep(1);
+                for(int i=0;i<200;i++)
+                {
+                    printf("斗地主都赢不了，还不赶紧敲代码！！！！！\n");
+                    usleep(10000);
+                }
+                    recvCYL(cFd,buf,1000);
+            }
+            if(rest_poker[1]<=0)
+            {
+                printf("大佬%s 赢了，你个菜鸡\n",front_name);
+                sleep(1);
+                for(int i=0;i<1000;i++)
+                {
+                    printf("斗地主都赢不了，还不赶紧敲代码！！！！！\n");
+                    usleep(10000);
+                }
+                    recvCYL(cFd,buf,1000);
+            }
+            if(strcmp(buf,argv[3])==0)
+            {
+                printf("大佬请出牌: 'N'代表不出\n\n");
+                send_poker(cFd);
+            }
+            break;
+        }
+    }
+    return 0;
+}
+

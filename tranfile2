@@ -1,0 +1,168 @@
+#include "function.h"
+
+const char m_iSort[54] = {47,51, 3, 7,11,15,19,23,27,31,35,39,43,46,50, 2, 6,10,14,18,22,26,30,34,38,42,45,49, 1, 5, 9,13,17,21,25,29,33,37,41,44,48, 0, 4, 8,12,16,20,24,28,32,36,40,52, 53};
+PLY_pk ply_pk;
+Train_t train;
+
+int recvCYL(int fd,void *pbuf,int len)
+{
+    char *buf = (char*)pbuf;
+    int total = 0,ret;
+    while(total<len)
+    {
+        ret = recv(fd,buf+total,len-total,0);
+        if(ret == 0)
+        {
+            printf("plyer qiut\n");
+            return -1;
+        }
+        total += ret;
+    }
+    return 0;
+}
+
+void Reshuffle(char*m_iPoker)
+{
+    srand(time(0));
+    memset(m_iPoker, -1, 54);
+    for (int iCard = 0; iCard < 54; iCard++)
+    {
+        int iPos = rand() % 54;
+        while (m_iPoker[iPos] != -1)
+        {
+            iPos++;
+            if (iPos >= 54) iPos = 0;
+        }
+        m_iPoker[iPos] = iCard;
+    }
+}
+
+void Sort(char x[], int iMin, int iMax)
+{
+    for (int i = iMin; i <= iMax-1; i++)
+    {
+        for (int j = i+1; j <= iMax; j++)
+        {
+            if (m_iSort[(int)x[j]] < m_iSort[(int)x[i]]) SWAP(x[i], x[j]);
+        }
+    }
+}
+
+void send_poker(int fd,int i)
+{
+    train.Len = ply_pk.len[i];
+    train.ctl_code = 1;
+    memcpy(train.buf,ply_pk.poker[i],ply_pk.len[i]);
+    int ret = send(fd,&train,8+train.Len,0);
+    if(ret == -1)
+    {
+        exit(0);
+    }
+}
+
+int tranFile(desk_stat *desk)
+{
+    char poker[54],buf[100];
+    int i,host,ret,ctl_code,len;
+    memset(&ply_pk,-1,sizeof(PLY_pk));
+    Reshuffle(poker);
+
+    for(i=0;i<3;i++)
+    {
+        train.Len = strlen(desk->name[(i+1)%3]);
+        strcpy(train.buf,desk->name[(i+1)%3]);
+        send(desk->socket_fd[i],&train,8+train.Len,0);
+        train.Len = strlen(desk->name[(i+2)%3]);
+        strcpy(train.buf,desk->name[(i+2)%3]);
+        send(desk->socket_fd[i],&train,8+train.Len,0);
+    }
+    for (i = 0; i < 48; i++)
+    {
+        SWAP(poker[i+0], poker[i+3]);
+        SWAP(poker[i+1], poker[i+4]);
+        SWAP(poker[i+2], poker[i+5]);
+    }
+    for(i=0;i<3;i++)
+    {
+        memcpy(ply_pk.poker[i],poker+17*i,17);
+        ply_pk.len[i]=17;
+    }
+    for(i=0;i<3;i++)
+    {
+        send_poker(desk->socket_fd[i],i);
+    }
+    Sort(poker,0,16);
+    Sort(poker,17,33);
+    Sort(poker,34,50);
+    Sort(poker,51,53);
+    for(i=0;i<3;i++)
+    {
+        memcpy(ply_pk.poker[i],poker+17*i,17);
+        ply_pk.len[i]=17;
+    }
+    for(i=0;i<3;i++)
+    {
+        send_poker(desk->socket_fd[i],i);
+    }
+    //---------------------------------------------------
+    //抢地主阶段，三个人都抢，最后一个人是地主，三个人都不抢，第一个人是地主
+    srand(time(0));
+    ret = rand()%3;
+    host =ret;
+    for(i=ret;i<3+ret;i++)
+    {
+        train.Len = strlen(desk->name[i%3]);
+        train.ctl_code = 2;
+        strcpy(train.buf,desk->name[i%3]);
+        for(int j=0;j<3;j++)
+        {
+            send(desk->socket_fd[j],&train,8+train.Len,0);
+        }
+        recvCYL(desk->socket_fd[i%3],&train.Len,4);
+        recvCYL(desk->socket_fd[i%3],&train.ctl_code,4);
+        recvCYL(desk->socket_fd[i%3],train.buf,train.Len);
+        if(*(train.buf) == '1')
+        {
+            host = i%3;
+        }
+        for(int j=0;j<3;j++)
+        {
+            if(j!=i%3)
+                send(desk->socket_fd[j],&train,8+train.Len,0);
+        }
+    }
+    train.Len = strlen(desk->name[host]);
+    train.ctl_code = 3;
+    strcpy(train.buf,desk->name[host]);
+    for(int j=0;j<3;j++)
+    {
+        send(desk->socket_fd[j],&train,8+train.Len,0);
+    }
+    train.Len = 3;
+    train.ctl_code = 3;
+    memcpy(train.buf,poker+51,3);
+    for(int j=0;j<3;j++)
+    {
+        send(desk->socket_fd[j],&train,8+train.Len,0);
+    }
+    memcpy(ply_pk.poker[host]+17,poker+51,3);
+    ply_pk.len[host] = 20;
+    Sort(ply_pk.poker[host],0,19);
+    send_poker(desk->socket_fd[host],host);
+
+    train.Len = strlen(desk->name[host]);
+    train.ctl_code = 4;
+    strcpy(train.buf,desk->name[host]);
+    for(int j=0;j<3;j++)
+    {
+        send(desk->socket_fd[j],&train,8+train.Len,0);
+    }
+    //---------------------------------------------------------
+    //出牌阶段 
+    for(i=host;;i++)
+    {
+        sleep(20);
+    }
+    return 0;
+}
+
